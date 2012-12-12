@@ -22,7 +22,11 @@ module ZendeskAPI
   class Topic < Resource; end
   class Bookmark < Resource; end
   class Ability < DataResource; end
-  class Group < Resource; end
+  class Macro < Resource; end
+  class Group < Resource
+    has_many User
+  end
+  class Trigger < ReadResource; end
   class SharingAgreement < ReadResource; end
   class JobStatus < ReadResource; end
 
