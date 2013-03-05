@@ -50,6 +50,9 @@ module ZendeskAPI
 
   class Upload < Data
     include Create
+    include Destroy
+
+    def id; token; end
 
     only_send_unnested_params
 
@@ -330,16 +333,9 @@ module ZendeskAPI
       put :request_verification
     end
 
-    def initialize(*)
-      super
-
-      # Needed for side-loading to work
-      self.role_id = role.id if self.key?(:role)
-    end
-
     has Organization
 
-    has CustomRole, :include => :roles
+    has CustomRole, :inline => true, :include => :roles
     has Role, :inline => true, :include_key => :name
     has Ability, :inline => true
 

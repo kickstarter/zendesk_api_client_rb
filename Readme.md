@@ -6,11 +6,12 @@ This client **only** supports Zendesk's v2 API.  Please see our [API documentati
 
 ## Additional Documentation
 
-Additional documentation can be found on [rubydoc.info](http://rubydoc.info/gems/zendesk_api/frames)
+Additional documentation can be found on our [documentation site](https://zendesk-api.herokuapp.com/doc/index.html) and [wiki](https://github.com/zendesk/zendesk_api_client_rb/wiki).
 
 ## Important Notice
 
-Version 0.0.5 brings with it a change to the top-level namespace. All references to Zendesk should now use ZendeskAPI.
+* Version 0.0.5 brings with it a change to the top-level namespace. All references to Zendesk should now use ZendeskAPI.
+* Version 0.3.0 changed the license from MIT to Apache Version 2.
 
 ## Installation
 
@@ -129,7 +130,7 @@ next_page = tickets.next
 previous_page = tickets.prev
 ```
 
-Iteration over all resources and pages is handled by Collection#page_page
+Iteration over all resources and pages is handled by Collection#each_page
 
 ```ruby
 client.tickets.each_page do |resource|
@@ -310,6 +311,13 @@ Additional Dependencies:
 Tested with Ruby 1.8.7 and 1.9.3
 [![Build Status](https://secure.travis-ci.org/zendesk/zendesk_api_client_rb.png?branch=master)](http://travis-ci.org/zendesk/zendesk_api_client_rb)
 
-## Copyright
+## Copyright and license
 
-See [LICENSE](https://github.com/zendesk/zendesk_api_client_rb/blob/master/LICENSE)
+Copyright 2013 Zendesk
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.

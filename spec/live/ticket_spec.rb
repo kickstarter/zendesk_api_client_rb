@@ -51,8 +51,7 @@ describe ZendeskAPI::Ticket do
 
     it "is able to do next" do
       first = results.to_a.first
-      recent_url = "api/v2/exports/tickets.json\\?start_time=#{Time.now.to_i.to_s[0..5]}"
-      stub_json_request(:get, /#{recent_url}/, json(:results => []))
+      stub_json_request(:get, %r{/api/v2/exports/tickets}, json(:results => []))
 
       results.next
       results.first.should_not == first
@@ -120,7 +119,7 @@ describe ZendeskAPI::Ticket do
           thread[:response][:status]
         end
 
-        threads.all? {|st| [201, 422].include?(st)}.should be_true
+        threads.all? {|st| [201, 422, 409].include?(st)}.should be_true
       end
     end
   end
