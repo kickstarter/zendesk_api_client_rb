@@ -1,7 +1,16 @@
 module ResourceMacros
+  def self.extended(klass)
+    klass.send(:define_method, :default_options) {{}}
+  end
+
   def under(object, &blk)
     context "under a #{object.class.singular_resource_name}" do
-      let(:default_options) { { "#{object.class.singular_resource_name}_id" => object.id } }
+      let(:parent) { object }
+
+      define_method(:default_options) do
+        { "#{object.class.singular_resource_name}_id" => object.id }
+      end
+
       instance_eval(&blk)
     end
   end

@@ -10,8 +10,6 @@ module ZendeskAPI
     # Options passed in that are automatically converted from an array to a comma-separated list.
     SPECIALLY_JOINED_PARAMS = [:ids, :only]
 
-    include Rescue
-
     # @return [ZendeskAPI::Association] The class association
     attr_reader :association
 
@@ -45,34 +43,53 @@ module ZendeskAPI
       end
     end
 
-    # Passes arguments and the proper path to the resource class method.
-    # @param [Hash] attributes Attributes to pass to Create#create
-    def create(attributes = {})
-      attributes.merge!(:association => @association)
-      @resource_class.create(@client, @options.merge(attributes))
+    methods = %w{create find update destroy}
+    methods += methods.map {|method| method + "!"}
+    methods.each do |deferrable|
+      # Passes arguments and the proper path to the resource class method.
+      # @param [Hash] options Options or attributes to pass
+      define_method deferrable do |*args|
+        unless @resource_class.respond_to?(deferrable)
+          raise NoMethodError.new("undefined method \"#{deferrable}\" for #{@resource_class}", deferrable, args)
+        end
+
+        opts = args.last.is_a?(Hash) ? args.pop : {}
+        opts.merge!(:association => @association)
+
+        @resource_class.send(deferrable, @client, opts)
+      end
     end
 
-    # (see #create)
-    def find(opts = {})
-      opts.merge!(:association => @association)
-      @resource_class.find(@client, @options.merge(opts))
+    # Convenience method to build a new resource and
+    # add it to the collection. Fetches the collection as well.
+    # @param [Hash] options Options or attributes to pass
+    def build(opts = {})
+      wrap_resource(opts, true).tap do |res|
+        self << res
+      end
     end
 
-    # (see #create)
-    def update(opts = {})
-      opts.merge!(:association => @association)
-      @resource_class.update(@client, @options.merge(opts))
-    end
+    # Convenience method to build a new resource and
+    # add it to the collection. Fetches the collection as well.
+    # @param [Hash] options Options or attributes to pass
+    def build!(opts = {})
+      wrap_resource(opts, true).tap do |res|
+        fetch!
 
-    # (see #create)
-    def destroy(opts = {})
-      opts.merge!(:association => association)
-      @resource_class.destroy(@client, @options.merge(opts))
+        # << does a fetch too
+        self << res
+      end
     end
 
     # @return [Number] The total number of resources server-side (disregarding pagination).
     def count
       fetch
+      @count || -1
+    end
+
+    # @return [Number] The total number of resources server-side (disregarding pagination).
+    def count!
+      fetch!
       @count || -1
     end
 
@@ -103,17 +120,13 @@ module ZendeskAPI
     # Saves all newly created resources stored in this collection.
     # @return [Collection] self
     def save
-      if @resources
-        @resources.map! do |item|
-          unless !item.respond_to?(:save) || item.changes.empty?
-            item.save
-          end
+      _save
+    end
 
-          item
-        end
-      end
-
-      self
+    # Saves all newly created resources stored in this collection.
+    # @return [Collection] self
+    def save!
+      _save(:save!)
     end
 
     # Adds an item (or items) to the list of side-loaded resources to request
@@ -127,6 +140,7 @@ module ZendeskAPI
     # @raise [ArgumentError] if the resource doesn't belong in this collection
     def <<(item)
       fetch
+
       if item.is_a?(Resource)
         if item.is_a?(@resource_class)
           @resources << item
@@ -134,8 +148,7 @@ module ZendeskAPI
           raise "this collection is for #{@resource_class}"
         end
       else
-        item.merge!(:association => @association) if item.is_a?(Hash)
-        @resources << @resource_class.new(@client, item)
+        @resources << wrap_resource(item, true)
       end
     end
 
@@ -146,11 +159,11 @@ module ZendeskAPI
 
     # Executes actual GET from API and loads resources into proper class.
     # @param [Boolean] reload Whether to disregard cache
-    def fetch(reload = false)
+    def fetch!(reload = false)
       if @resources && (!@fetchable || !reload)
         return @resources
       elsif association && association.options.parent && association.options.parent.new_record?
-        return @resources = []
+        return (@resources = [])
       end
 
       @response = get_response(@query || self.path)
@@ -160,32 +173,42 @@ module ZendeskAPI
       @resources
     end
 
-    rescue_client_error :fetch, :with => lambda { Array.new }
+    def fetch(*args)
+      fetch!(*args)
+    rescue Faraday::Error::ClientError => e
+      []
+    end
 
     # Alias for fetch(false)
     def to_a
       fetch
     end
 
+    # Alias for fetch!(false)
+    def to_a!
+      fetch!
+    end
+
     # Calls #each on every page with the passed in block
     # @param [Block] block Passed to #each
-    def each_page(start_page = @options["page"], &block)
-      page(start_page)
-      clear_cache
+    def all!(start_page = @options["page"], &block)
+      _all(start_page, :bang, &block)
+    end
 
-      while !empty?
-        each do |resource|
-          arguments = [resource, @options["page"] || 1]
+    # Calls #each on every page with the passed in block
+    # @param [Block] block Passed to #each
+    def all(start_page = @options["page"], &block)
+      _all(start_page, &block)
+    end
 
-          if block.arity >= 0
-            arguments = arguments.take(block.arity)
-          end
+    def each_page!(*args, &block)
+      warn "ZendeskAPI::Collection#each_page! is deprecated, please use ZendeskAPI::Collection#all!"
+      all!(*args, &block)
+    end
 
-          block.call(*arguments)
-        end
-
-        self.next
-      end
+    def each_page(*args, &block)
+      warn "ZendeskAPI::Collection#each_page is deprecated, please use ZendeskAPI::Collection#all"
+      all(*args, &block)
     end
 
     # Replaces the current (loaded or not) resources with the passed in collection
@@ -234,6 +257,7 @@ module ZendeskAPI
       @count = nil
       @next_page = nil
       @prev_page = nil
+      @query = nil
     end
 
     # @private
@@ -277,6 +301,41 @@ module ZendeskAPI
       end
     end
 
+    def _all(start_page = @options["page"], bang = false, &block)
+      page(start_page)
+      clear_cache
+
+      while (bang ? fetch! : fetch) && !empty?
+        each do |resource|
+          arguments = [resource, @options["page"] || 1]
+
+          if block.arity >= 0
+            arguments = arguments.take(block.arity)
+          end
+
+          block.call(*arguments)
+        end
+
+        self.next
+      end
+    end
+
+    def _save(method = :save)
+      return self unless @resources
+
+      result = true
+
+      @resources.map! do |item|
+        if item.respond_to?(method) && item.changed?
+          result &&= item.send(method)
+        end
+
+        item
+      end
+
+      result
+    end
+
     ## Initialize
 
     def join_special_params
@@ -316,10 +375,28 @@ module ZendeskAPI
 
     def handle_response(body)
       results = body.delete(@resource_class.model_key) || body.delete("results")
-      @resources = results.map {|res| @resource_class.new(@client, res)}
+
+      @resources = results.map do |res|
+        wrap_resource(res)
+      end
 
       set_page_and_count(body)
       set_includes(@resources, @includes, body)
+    end
+
+    # Simplified Associations#wrap_resource
+    def wrap_resource(res, with_association = @resource_class == Tag)
+      case res
+      when Array
+        wrap_resource(Hash[*res])
+      when Hash
+        res = res.merge(:association => @association) if with_association
+        @resource_class.new(@client, res)
+      else
+        res = { :id => res }
+        res.merge!(:association => @association) if with_association
+        @resource_class.new(@client, res)
+      end
     end
 
     ## Method missing

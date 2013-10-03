@@ -11,15 +11,14 @@ module ZendeskAPI
 
   class Locale < ReadResource; end
 
-  class CRMData < DataResource
-    class << self
-      alias :resource_name :singular_resource_name
+  class CustomRole < DataResource; end
+
+  class Role < DataResource
+    def to_param
+      name
     end
   end
 
-  class CRMDataStatus < DataResource; end
-  class CustomRole < DataResource; end
-  class Role < DataResource; end
   class Topic < Resource; end
   class Bookmark < Resource; end
   class Ability < DataResource; end
@@ -29,13 +28,55 @@ module ZendeskAPI
   class SharingAgreement < ReadResource; end
   class JobStatus < ReadResource; end
 
+  class Tag < DataResource
+    include Update
+    include Destroy
+
+    alias :name :id
+
+    def path(opts = {})
+      raise "tags must have parent resource" unless association.options.parent
+      super(opts.merge(:with_parent => true, :with_id => false))
+    end
+
+    def changed?
+      true
+    end
+
+    def destroy!
+      super do |req|
+        req.body = attributes_for_save
+      end
+    end
+
+    module Update
+      def _save(method = :save)
+        return self unless @resources
+
+        @client.connection.post(path) do |req|
+          req.body = { :tags => @resources.map(&:id) }
+        end
+
+        true
+      rescue Faraday::Error::ClientError => e
+        if method == :save
+          false
+        else
+          raise e
+        end
+      end
+    end
+
+    def attributes_for_save
+      { self.class.resource_name => [id] }
+    end
+  end
+
   class Attachment < Data
     def initialize(client, attributes)
-      if attributes.is_a?(Hash)
-        super
-      else
-        super(client, :file => attributes)
-      end
+      attributes[:file] ||= attributes.delete(:id)
+
+      super
     end
 
     def save
@@ -54,9 +95,13 @@ module ZendeskAPI
 
     def id; token; end
 
-    only_send_unnested_params
-
     has_many Attachment
+
+    private
+
+    def attributes_for_save
+      attributes.changes
+    end
   end
 
   class MobileDevice < Resource
@@ -70,10 +115,10 @@ module ZendeskAPI
 
     has_many Ticket
     has_many User
+    has_many Tag, :extend => Tag::Update
   end
 
   class ForumSubscription < Resource
-    only_send_unnested_params
     has Forum
     has User
   end
@@ -92,7 +137,6 @@ module ZendeskAPI
   end
 
   class TopicSubscription < Resource
-    only_send_unnested_params
     has Topic
     has User
   end
@@ -113,15 +157,21 @@ module ZendeskAPI
     end
 
     class TopicVote < SingularResource
-      only_send_unnested_params
       has Topic
       has User
+
+      private
+
+      def attributes_for_save
+        attributes.changes
+      end
     end
 
     has Forum
     has_many :comments, :class => TopicComment
     has_many :subscriptions, :class => TopicSubscription
     has :vote, :class => TopicVote
+    has_many Tag, :extend => Tag::Update
 
     def votes(opts = {})
       return @votes if @votes && !opts[:reload]
@@ -140,8 +190,13 @@ module ZendeskAPI
     attr_reader :on
 
     def initialize(client, attributes = {})
-      @on = attributes.first
-      super(client, attributes[1])
+      # Try and find the root key
+      @on = (attributes.keys.map(&:to_s) - %w{association options}).first
+
+      # Make what's inside that key the root attributes
+      attributes.merge!(attributes.delete(@on))
+
+      super
     end
   end
 
@@ -164,6 +219,7 @@ module ZendeskAPI
       ZendeskAPI::Collection.new(client, self, options)
     end
 
+    # Quack like a Resource
     # Creates the correct resource class from the result_type passed in
     def self.new(client, attributes)
       result_type = attributes["result_type"]
@@ -176,12 +232,16 @@ module ZendeskAPI
       (klass || Result).new(client, attributes)
     end
 
-    def self.resource_name
-      "search"
-    end
+    class << self
+      def resource_name
+        "search"
+      end
 
-    def self.model_key
-      "results"
+      alias :resource_path :resource_name
+
+      def model_key
+        "results"
+      end
     end
   end
 
@@ -208,8 +268,6 @@ module ZendeskAPI
       # need this to support SideLoading
       has :author, :class => User
     end
-
-    class Tag < Resource; end
 
     class Comment < Data
       include Save
@@ -238,6 +296,10 @@ module ZendeskAPI
     has :comment, :class => Comment, :inline => true
     has :last_comment, :class => Comment, :inline => true
     has_many :last_comments, :class => Comment, :inline => true
+
+    has_many Tag, :extend => Tag::Update
+
+    has_many :incidents, :class => Ticket
 
     # Gets a incremental export of tickets from the start_time until now.
     # @param [Client] client The {Client} object to be used
@@ -287,7 +349,16 @@ module ZendeskAPI
 
   class ViewCount < DataResource; end
 
-  class View < Resource
+  class Rule < Resource
+    private
+
+    def attributes_for_save
+      to_save = [:conditions, :actions, :output].inject({}) {|h,k| h.merge(k => send(k))}
+      { self.class.singular_resource_name.to_sym => attributes.changes.merge(to_save) }
+    end
+  end
+
+  class View < Rule
     has_many :tickets, :class => Ticket
     has_many :feed, :class => Ticket, :path => "feed"
 
@@ -300,16 +371,38 @@ module ZendeskAPI
     end
   end
 
-  class Trigger < Resource
+  class Trigger < Rule
     has :execution, :class => RuleExecution
   end
 
-  class Automation < Resource
+  class Automation < Rule
     has :execution, :class => RuleExecution
   end
 
-  class Macro < Resource
+  class Macro < Rule
     has :execution, :class => RuleExecution
+
+    # Returns the update to a ticket that happens when a macro will be applied.
+    # @param [Ticket] ticket Optional {Ticket} to apply this macro to.
+    # @raise [Faraday::Error::ClientError] Raised for any non-200 response.
+    def apply!(ticket = nil)
+      path = "#{self.path}/apply"
+
+      if ticket
+        path = "#{ticket.path}/#{path}"
+      end
+
+      response = @client.connection.get(path)
+      Hashie::Mash.new(response.body.fetch("result", {}))
+    end
+
+    # Returns the update to a ticket that happens when a macro will be applied.
+    # @param [Ticket] ticket Optional {Ticket} to apply this macro to
+    def apply(ticket = nil)
+      apply!(ticket)
+    rescue Faraday::Error::ClientError => e
+      Hashie::Mash.new
+    end
   end
 
   class GroupMembership < Resource
@@ -333,6 +426,13 @@ module ZendeskAPI
       put :request_verification
     end
 
+    def initialize(*)
+      super
+
+      # Needed for proper Role sideloading
+      self.role_id = role.name if key?(:role)
+    end
+
     has Organization
 
     has CustomRole, :inline => true, :include => :roles
@@ -353,9 +453,38 @@ module ZendeskAPI
     has_many TopicSubscription
     has_many :topic_comments, :class => TopicComment
     has_many :topic_votes, :class => Topic::TopicVote
+  end
 
-    has CRMData
-    has CRMDataStatus, :path => 'crm_data/status'
+  class UserField < Resource; end
+  class OrganizationField < Resource; end
+
+  class OauthClient < Resource
+    namespace "oauth"
+
+    def self.singular_resource_name
+      "client"
+    end
+  end
+
+  class OauthToken < ReadResource
+    include Destroy
+    namespace "oauth"
+
+    def self.singular_resource_name
+      "token"
+    end
+  end
+
+  class Target < Resource; end
+
+  module Voice
+    class PhoneNumber < Resource
+      namespace "channels/voice"
+    end
+  end
+
+  class TicketForm < Resource
+    # TODO
+    # post :clone
   end
 end
-

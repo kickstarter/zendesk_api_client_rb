@@ -19,7 +19,7 @@ describe ZendeskAPI::Client do
         ZendeskAPI::Client.new do |config|
           config.url = "http://www.google.com"
         end
-      end.to raise_error(ArgumentError) 
+      end.to raise_error(ArgumentError)
     end
 
     it "should not raise an exception when url isn't ssl and allow_http is set to true" do
@@ -39,15 +39,55 @@ describe ZendeskAPI::Client do
       end
     end
 
-    context "#token" do
-      context "with a username with /token" do
-        subject do
-          ZendeskAPI::Client.new do |config|
-            config.url = "https://example.zendesk.com"
-            config.username = "hello/token"
-            config.token = "token"
-          end.config
+    context "basic_auth" do
+      subject do
+        ZendeskAPI::Client.new do |config|
+          config.url = "https://example.zendesk.com"
+          config.username = "hello"
+          config.password = "token"
         end
+      end
+
+      it "should build basic auth middleware" do
+        subject.connection.builder.handlers.index(Faraday::Request::BasicAuthentication).should_not be_nil
+      end
+
+      it "should not build token middleware" do
+        subject.connection.headers["Authorization"].should be_nil
+      end
+    end
+
+    context "access token" do
+      subject do
+        ZendeskAPI::Client.new do |config|
+          config.url = "https://example.zendesk.com"
+          config.access_token = "hello"
+        end
+      end
+
+      it "should not build basic auth middleware" do
+        subject.connection.builder.handlers.index(Faraday::Request::BasicAuthentication).should be_nil
+      end
+
+      it "should build token middleware" do
+        subject.connection.headers["Authorization"].should match(/Bearer/)
+      end
+    end
+
+    context "#token" do
+      let(:client) do
+        ZendeskAPI::Client.new do |config|
+          config.url = "https://example.zendesk.com"
+          config.username = username
+          config.token = "token"
+        end
+      end
+
+      subject { client.config }
+      let(:username) { "hello" }
+
+      context "with a username with /token" do
+        let(:username) { "hello/token" }
 
         it "should not add /token to the username" do
           subject.username.should == "hello/token"
@@ -55,12 +95,12 @@ describe ZendeskAPI::Client do
       end
 
       context "with no password" do
-        subject do
-          ZendeskAPI::Client.new do |config|
-            config.url = "https://example.zendesk.com"
-            config.username = "hello"
-            config.token = "token"
-          end.config
+        it "should build basic auth middleware" do
+          client.connection.builder.handlers.index(Faraday::Request::BasicAuthentication).should_not be_nil
+        end
+
+        it "should not build token middleware" do
+          client.connection.builder.handlers.index(Faraday::Request::TokenAuthentication).should be_nil
         end
 
         it "should copy token to password" do
@@ -75,7 +115,7 @@ describe ZendeskAPI::Client do
 
     context "#logger" do
       before(:each) do
-        @client = ZendeskAPI::Client.new do |config| 
+        @client = ZendeskAPI::Client.new do |config|
           config.url = "https://example.zendesk.com/"
           config.logger = subject
         end
@@ -159,10 +199,24 @@ describe ZendeskAPI::Client do
       subject.tickets.should be_instance_of(ZendeskAPI::Collection)
 
       subject.instance_variable_get(:@resource_cache)["tickets"].should_not be_empty
+      subject.instance_variable_get(:@resource_cache)["tickets"][:class].should == ZendeskAPI::Ticket
+      subject.instance_variable_get(:@resource_cache)["tickets"][:cache].should be_instance_of(ZendeskAPI::LRUCache)
+
+      ZendeskAPI.should_not_receive(:const_get)
+      subject.tickets.should be_instance_of(ZendeskAPI::Collection)
     end
 
     it "should not cache calls with different options" do
       subject.search(:query => 'abc').should_not == subject.search(:query => '123')
+    end
+
+    it "should not cache calls with :reload => true options" do
+      subject.search(:query => 'abc').should_not == subject.search(:query => 'abc', :reload => true)
+    end
+
+    it "should not pass reload to the underlying collection" do
+      collection = subject.search(:query => 'abc', :reload => true)
+      collection.options.key?(:reload).should be_false
     end
 
     it "should cache calls with the same options" do
@@ -177,5 +231,16 @@ describe ZendeskAPI::Client do
     client.config.allow_http.should == true
     client.connection.should == "FOO"
     client.connection.object_id.should == client.connection.object_id # it's cached
+  end
+
+  context ZendeskAPI::Voice do
+    it "defers to voice delegator" do
+      ZendeskAPI::Client.any_instance.should_receive(:phone_numbers).once
+      subject.voice.phone_numbers
+    end
+
+    it "manages namespace correctly" do
+      ZendeskAPI::Voice::PhoneNumber.new(subject, {}).path.should match(/channels\/voice\/phone_numbers/)
+    end
   end
 end

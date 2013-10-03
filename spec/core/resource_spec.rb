@@ -1,6 +1,15 @@
 require 'core/spec_helper'
 
 describe ZendeskAPI::Resource do
+  context "initialize" do
+    context "with :global as part of attributes" do
+      it "should set @global_params" do
+        resource = ZendeskAPI::TestResource.new(client, { :global => { :something => 'hey' }})
+        resource.instance_variable_get(:@global_params).should == { :something => 'hey' }
+      end
+    end
+  end
+
   context "#update" do
     context "class method" do
       let(:id) { 1 }
@@ -12,6 +21,16 @@ describe ZendeskAPI::Resource do
 
       it "should return instance of resource" do
         subject.update(client, :id => id, :test => :hello).should be_true
+      end
+
+      context "with global params" do
+        before(:each) do
+          stub_json_request(:put, %r{test_resources/#{id}}).with(:body => json({ :test_resource => { :test => :hello }, :something => "something"}))
+        end
+
+        it "should return instance of resource" do
+          subject.update(client, :id => id, :test => :hello, :global => {:something => "something"}).should be_true
+        end
       end
 
       context "with client error" do
@@ -80,7 +99,7 @@ describe ZendeskAPI::Resource do
     subject { ZendeskAPI::TestResource.new(client, :id => 1) }
 
     before(:each) do
-      subject.should_receive(:save).and_return(false)
+      stub_request(:put, %r{test_resources/1}).to_return(:status => 422)
     end
 
     it "should raise if save fails" do
@@ -322,8 +341,8 @@ describe ZendeskAPI::Resource do
             stub_request(verb.to_sym, %r{test_resources/1/#{method}}).to_return(:status => 500)
           end
 
-          it "should return false" do
-            expect { silence_logger{ subject.send(method).should be_false } }.to_not raise_error
+          it "should raise" do
+            expect { silence_logger{ subject.send(method) } }.to raise_error(ZendeskAPI::Error::ClientError)
           end
         end
       end
@@ -363,8 +382,16 @@ describe ZendeskAPI::Resource do
       ZendeskAPI::TestResource.new(client, :id => 2).should_not == ZendeskAPI::TestResource.new(client, :id => 1)
     end
 
-    it "is different when class is different" do
-      ZendeskAPI::TestResource.new(client, :id => 2).should_not == ZendeskAPI::TestResource::TestChild.new(client, :id => 2)
+    it "is same when class is Data" do
+      ZendeskAPI::TestResource.new(client, :id => 2).should == ZendeskAPI::TestResource::TestChild.new(client, :id => 2)
+    end
+
+    it "is same when class is Integer" do
+      ZendeskAPI::TestResource.new(client, :id => 2).should == 2
+    end
+
+    it "is different when class is Integer" do
+      ZendeskAPI::TestResource.new(client, :id => 2).should_not == 3
     end
 
     it "is different when other is no resource" do
@@ -384,6 +411,16 @@ describe ZendeskAPI::Resource do
         expect do
           ZendeskAPI::SingularTestResource.find(client)
         end.to_not raise_error(ArgumentError)
+      end
+    end
+
+    context "#update" do
+      before do
+        stub_json_request(:put, %r{/singular_test_resource})
+      end
+
+      it "should always PUT" do
+        ZendeskAPI::SingularTestResource.update(client, :test => :test)
       end
     end
   end

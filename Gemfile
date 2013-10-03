@@ -3,11 +3,9 @@ source 'https://rubygems.org'
 # gem "bundler", "~> 1.2.0"
 # ruby "1.9.3"
 
-gem "simplecov", :platforms => :ruby_19, :group => :development
+gem "simplecov", :platforms => :ruby_19, :group => :test
 gem "jruby-openssl", :platforms => :jruby
-gem "hashie", :git => "git://github.com/intridea/hashie.git"
-gem "multipart-post", :git => "git://github.com/steved555/multipart-post.git"
-gem "multi_json", :group => :test
+gem "multipart-post", :git => "https://github.com/steved555/multipart-post.git"
 
 group :server do
   gem "thin"
@@ -36,5 +34,7 @@ end
 group :console do
   gem "ripl"
 end
+
+gem "json", :group => :test, :platform => :ruby_18
 
 gemspec

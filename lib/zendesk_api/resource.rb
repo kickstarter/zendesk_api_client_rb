@@ -9,7 +9,6 @@ module ZendeskAPI
   # Represents a resource that only holds data.
   class Data
     include Associations
-    include Rescue
 
     class << self
       def inherited(klass)
@@ -30,16 +29,14 @@ module ZendeskAPI
         @resource_name ||= Inflection.plural(singular_resource_name)
       end
 
-      alias :model_key :resource_name
-
-      # @private
-      def only_send_unnested_params
-        @unnested_params = true
+      def resource_path
+        [@namespace, resource_name].compact.join("/")
       end
 
-      # @private
-      def unnested_params
-        @unnested_params ||= false
+      alias :model_key :resource_name
+
+      def namespace(namespace)
+        @namespace = namespace
       end
     end
 
@@ -47,7 +44,8 @@ module ZendeskAPI
     attr_reader :attributes
     # @return [ZendeskAPI::Association] The association
     attr_accessor :association
-
+    # @return [Array] The last received errors
+    attr_accessor :errors
     # Place to dump the last response
     attr_accessor :response
 
@@ -57,6 +55,7 @@ module ZendeskAPI
     def initialize(client, attributes = {})
       raise "Expected a Hash for attributes, got #{attributes.inspect}" unless attributes.is_a?(Hash)
       @association = attributes.delete(:association) || Association.new(:class => self.class)
+      @global_params = attributes.delete(:global) || {}
       @client = client
       @attributes = ZendeskAPI::Trackie.new(attributes)
 
@@ -93,8 +92,8 @@ module ZendeskAPI
     end
 
     # Returns the path to the resource
-    def path(*args)
-      @association.generate_path(self, *args)
+    def path(options = {})
+      @association.generate_path(self, options)
     end
 
     # Passes #to_json to the underlying attributes hash
@@ -110,11 +109,21 @@ module ZendeskAPI
 
     # Compares resources by class and id. If id is nil, then by object_id
     def ==(other)
-      warn "Trying to compare #{other.class} to a Resource from #{caller.first}" if other && !other.is_a?(Data)
-      other.is_a?(self.class) && ((other.id && other.id == id) || (other.object_id == self.object_id))
+      return true if other.object_id == self.object_id
+
+      if other && !(other.is_a?(Data) || other.is_a?(Integer))
+        warn "Trying to compare #{other.class} to a Resource from #{caller.first}"
+      end
+
+      if other.is_a?(Data)
+        other.id && other.id == id
+      elsif other.is_a?(Integer)
+        id == other
+      else
+        false
+      end
     end
     alias :eql :==
-    alias :hash :id
 
     # @private
     def inspect
@@ -122,6 +131,12 @@ module ZendeskAPI
     end
 
     alias :to_param :attributes
+
+    private
+
+    def attributes_for_save
+      { self.class.singular_resource_name.to_sym => attributes.changes }
+    end
   end
 
   # Indexable resource
@@ -159,5 +174,9 @@ module ZendeskAPI
     include Destroy
   end
 
-  class SingularResource < Resource; end
+  class SingularResource < Resource
+    def attributes_for_save
+      { self.class.resource_name.to_sym => attributes.changes }
+    end
+  end
 end

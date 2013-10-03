@@ -22,7 +22,7 @@ Gem::Specification.new do |s|
   s.add_development_dependency "rake"
   s.add_development_dependency "rspec"
   s.add_development_dependency "vcr"
-  s.add_development_dependency "webmock"
+  s.add_development_dependency "webmock", "~> 1.9.0"
   s.add_development_dependency "yard"
 
 # Optional. Only used for uploads testing.
@@ -30,9 +30,9 @@ Gem::Specification.new do |s|
 
   s.add_runtime_dependency "faraday", ">= 0.8.0"
   s.add_runtime_dependency "faraday_middleware", ">= 0.8.7"
-  s.add_runtime_dependency "hashie"
+  s.add_runtime_dependency "hashie", ">= 1.2"
   s.add_runtime_dependency "inflection"
-  s.add_runtime_dependency "json"
+  s.add_runtime_dependency "multi_json"
   s.add_runtime_dependency "mime-types"
   s.add_runtime_dependency "multipart-post"
 

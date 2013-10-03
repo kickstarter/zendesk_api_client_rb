@@ -13,7 +13,7 @@ require 'zendesk_api'
 require 'vcr'
 require 'logger'
 require 'stringio'
-require 'json'
+require 'multi_json'
 
 require File.join(File.dirname(__FILE__), '..', 'macros', 'resource_macros')
 require File.join(File.dirname(__FILE__), '..', 'fixtures', 'zendesk')
@@ -44,7 +44,7 @@ def client
       config.retry = true
     end
 
-    client.config.logger.level = (ENV["LOG"] ? Logger::INFO : Logger::WARN)
+    client.config.logger.level = (ENV["LOG"] ? Logger::DEBUG : Logger::WARN)
     client.config.cache.size = 0
 
     client
@@ -68,12 +68,12 @@ module TestHelper
   end
 
   def json(body = {})
-    JSON.dump(body)
+    MultiJson.dump(body)
   end
 
   def stub_json_request(verb, path_matcher, body = json, options = {})
     stub_request(verb, path_matcher).to_return(Hashie::Mash.new(
-      :body => body, :headers => { :content_type => "application/json" }
+      :body => body, :headers => { :content_type => "application/json", :content_length => body.size }
     ).deep_merge(options))
   end
 end

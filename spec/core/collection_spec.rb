@@ -44,6 +44,20 @@ describe ZendeskAPI::Collection do
       subject.update(:id => 1)
     end
 
+    context "when class doesn't have method" do
+      subject do
+        ZendeskAPI::Collection.new(client, ZendeskAPI::NilDataResource)
+      end
+
+      it "should raise NoMethodError" do
+        expect { subject.create }.to raise_error(NoMethodError)
+      end
+
+      it "should raise NoMethodError" do
+        expect { subject.create! }.to raise_error(NoMethodError)
+      end
+    end
+
     context "with a class with a parent" do
       let(:association) do
         ZendeskAPI::Association.new(:class => ZendeskAPI::TestResource::TestChild,
@@ -83,6 +97,18 @@ describe ZendeskAPI::Collection do
 
         it "should pass association" do
           subject.last.association.should == association
+        end
+
+        it "should #build a resource and add it" do
+          resource = subject.build
+          subject.should include(resource)
+          resource.association.should == subject.association
+        end
+
+        it "should #build! a resource and add it" do
+          resource = subject.build!
+          subject.should include(resource)
+          resource.association.should == subject.association
         end
       end
     end
@@ -165,7 +191,7 @@ describe ZendeskAPI::Collection do
     end
   end
 
-  context "each_page" do
+  context "all" do
     context "Faraday errors" do
       before(:each) do
         stub_json_request(:get, %r{test_resources$}, json(
@@ -190,9 +216,23 @@ describe ZendeskAPI::Collection do
           end
 
           begin
-            silence_logger { subject.each_page(&b) }
+            silence_logger { subject.all(&b) }
           rescue SearchError
             retry
+          end
+        end.to yield_successive_args(
+          [ZendeskAPI::TestResource.new(client, :id => 1), 1],
+          [ZendeskAPI::TestResource.new(client, :id => 2), 2]
+        )
+      end
+
+      it "should retry from the same page!" do
+        expect do |b|
+          begin
+            subject.all!(&b)
+          rescue ZendeskAPI::Error::NetworkError
+            retry
+          rescue ZendeskAPI::Error::ClientError
           end
         end.to yield_successive_args(
           [ZendeskAPI::TestResource.new(client, :id => 1), 1],
@@ -231,7 +271,7 @@ describe ZendeskAPI::Collection do
             end
           end
 
-          silence_logger { subject.each_page(&block) }
+          silence_logger { subject.all(&block) }
         end.to yield_successive_args(
           ZendeskAPI::TestResource.new(client, :id => 1),
           ZendeskAPI::TestResource.new(client, :id => 2)
@@ -240,7 +280,7 @@ describe ZendeskAPI::Collection do
 
       it "should yield resource and page" do
         expect do |b|
-          silence_logger { subject.each_page(&b) }
+          silence_logger { subject.all(&b) }
         end.to yield_successive_args(
           [ZendeskAPI::TestResource.new(client, :id => 1), 1],
           [ZendeskAPI::TestResource.new(client, :id => 2), 2]
@@ -329,7 +369,7 @@ describe ZendeskAPI::Collection do
     end
 
     context "with a hash" do
-      let(:object) { mock('ZendeskAPI::TestResource', :changes => [:xxx]) }
+      let(:object) { mock('ZendeskAPI::TestResource', :changes => [:xxx], :changed? => true) }
 
       it "should call create with those options" do
         ZendeskAPI::TestResource.should_receive(:new).
@@ -363,8 +403,11 @@ describe ZendeskAPI::Collection do
 
     context "with everything else" do
       it "should pass to new, since this is how attachment handles it" do
-        attachment = mock(:changes => [:xxx])
-        ZendeskAPI::TestResource.should_receive(:new).with(client, "img.jpg").and_return attachment
+        attachment = mock(:changes => [:xxx], :changed? => true)
+        ZendeskAPI::TestResource.should_receive(:new).
+          with(client, :id => "img.jpg", :association => instance_of(ZendeskAPI::Association)).
+          and_return attachment
+
         subject << "img.jpg"
 
         attachment.should_receive :save
@@ -670,6 +713,22 @@ describe ZendeskAPI::Collection do
     context "deferral" do
       it "should defer #create to the resource class with proper path" do
         subject.create
+      end
+    end
+
+    context "resources" do
+      before(:each) do
+        stub_json_request(:get, %r{test_resources/active},
+          json(:test_resources => [{ :id => 1 }]))
+
+        subject.fetch
+
+        stub_json_request(:put, %r{test_resources/1})
+      end
+
+      it "should not save using the collection path" do
+        resource = subject.first
+        resource.save
       end
     end
   end

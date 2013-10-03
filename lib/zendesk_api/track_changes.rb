@@ -21,7 +21,15 @@ module ZendeskAPI
     module InstanceMethods
       def clear_changes
         each do |k, v|
-          v.clear_changes if v.respond_to?(:clear_changes)
+          if v.respond_to?(:clear_changes)
+            v.clear_changes
+          elsif v.is_a?(Array)
+            v.each do |val|
+              if val.respond_to?(:clear_changes)
+                val.clear_changes
+              end
+            end
+          end
         end
 
         changes.clear
@@ -59,6 +67,8 @@ module ZendeskAPI
           each do |k, v|
             if v.respond_to?(:changed?) && v.changed?
               changes[k] = v.changes
+            elsif v.is_a?(Array) && v.any? {|val| val.respond_to?(:changed?) && val.changed?}
+              changes[k] = v
             end
           end
         end
@@ -71,6 +81,7 @@ module ZendeskAPI
           changes.key?(key)
         end
       end
+
       alias :dirty? :changed?
     end
   end

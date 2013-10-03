@@ -34,7 +34,7 @@ module ZendeskAPI::Server
         @error = "The connection failed"
       rescue Faraday::Error::ClientError => e
         set_response(e.response) if e.response
-      rescue JSON::ParserError
+      rescue MultiJson::LoadError
         @error = "The JSON you attempted to send was invalid"
       rescue URI::InvalidURIError, ArgumentError
         @error = "Please enter a valid URL"
@@ -52,7 +52,7 @@ module ZendeskAPI::Server
         end
 
         if @method != :get && @json && !@json.empty?
-          request.body = JSON.parse(@json)
+          request.body = MultiJson.load(@json)
         end
 
         set_request(request.to_env(client.connection))
@@ -60,8 +60,10 @@ module ZendeskAPI::Server
     end
 
     def map_headers(headers)
+      return "" if !headers
+
       headers.map do |k,v|
-        name = k.split("-").map(&:capitalize).join("-")
+        name = k.to_s.split("-").map(&:capitalize).join("-")
         "#{name}: #{v}"
       end.join("\n")
     end

@@ -4,14 +4,16 @@
 
 This client **only** supports Zendesk's v2 API.  Please see our [API documentation](http://developer.zendesk.com) for more information.
 
-## Additional Documentation
+## Documentation
 
-Additional documentation can be found on our [documentation site](https://zendesk-api.herokuapp.com/doc/index.html) and [wiki](https://github.com/zendesk/zendesk_api_client_rb/wiki).
+Please check out the [wiki](https://github.com/zendesk/zendesk_api_client_rb/wiki), [class documentation](https://zendesk-api.herokuapp.com/doc/index.html), and [issues](https://github.com/zendesk/zendesk_api_client_rb/issues) before reporting a bug or asking for help.
 
-## Important Notice
+## Important Notices
 
 * Version 0.0.5 brings with it a change to the top-level namespace. All references to Zendesk should now use ZendeskAPI.
 * Version 0.3.0 changed the license from MIT to Apache Version 2.
+* Version 0.3.2 introduced a regression when side-loading roles on users. This was fixed in 0.3.4.
+* Version 1.0.0 changes the way errors are handled. Please see the [wiki page](https://github.com/zendesk/zendesk_api_client_rb/wiki/Errors) for more info.
 
 ## Installation
 
@@ -44,11 +46,15 @@ client = ZendeskAPI::Client.new do |config|
 
   config.url = "<- your-zendesk-url ->" # e.g. https://mydesk.zendesk.com/api/v2
 
+  # Basic / Token Authentication
   config.username = "login.email@zendesk.com"
 
   # Choose one of the following depending on your authentication choice
   config.token = "your zendesk token"
   config.password = "your zendesk password"
+
+  # OAuth Authentication
+  config.access_token = "your OAuth access token"
 
   # Optional:
 
@@ -84,7 +90,7 @@ One way to use the client is to pass it in as an argument to individual classes.
 ZendeskAPI::Ticket.new(client, :id => 1, :priority => "urgent") # doesn't actually send a request, must explicitly call #save
 ZendeskAPI::Ticket.create(client, :subject => "Test Ticket", :comment => { :value => "This is a test" }, :submitter_id => client.current_user.id, :priority => "urgent")
 ZendeskAPI::Ticket.find(client, :id => 1)
-ZendeskAPI::Ticket.delete(client, :id => 1)
+ZendeskAPI::Ticket.destroy(client, :id => 1)
 ```
 
 Another way is to use the instance methods under client.
@@ -92,8 +98,9 @@ Another way is to use the instance methods under client.
 ```ruby
 client.tickets.first
 client.tickets.find(:id => 1)
+client.tickets.build(:subject => "Test Ticket")
 client.tickets.create(:subject => "Test Ticket", :comment => { :value => "This is a test" }, :submitter_id => client.current_user.id, :priority => "urgent")
-client.tickets.delete(:id => 1)
+client.tickets.destroy(:id => 1)
 ```
 
 The methods under ZendeskAPI::Client (such as .tickets) return an instance of ZendeskAPI::Collection a lazy-loaded list of that resource.
@@ -126,23 +133,25 @@ ZendeskAPI::Collections can be paginated:
 
 ```ruby
 tickets = client.tickets.page(2).per_page(3)
-next_page = tickets.next
-previous_page = tickets.prev
+next_page = tickets.next # => 3
+tickets.fetch # GET /api/v2/tickets?page=3&per_page=3
+previous_page = tickets.prev # => 2
+tickets.fetch # GET /api/v2/tickets?page=2&per_page=3
 ```
 
-Iteration over all resources and pages is handled by Collection#each_page
+Iteration over all resources and pages is handled by Collection#all
 
 ```ruby
-client.tickets.each_page do |resource|
-  # all resources will be yielded
+client.tickets.all do |resource|
+  # every resource, from all pages, will be yielded to this block
 end
 ```
 
-If given a block with two arguments, the page is also passed in.
+If given a block with two arguments, the page number is also passed in.
 
 ```ruby
-client.tickets.each_page do |resource, page|
-  # all resources will be yielded along with the page
+client.tickets.all do |resource, page_number|
+  # all resources will be yielded along with the page number
 end
 ```
 
@@ -259,42 +268,6 @@ ticket.comment.uploads << "img.jpg"
 ticket.comment.uploads << File.new("img.jpg")
 ticket.save
 ```
-
-## Extras
-
-The following projects are still works in progress and require checking out the repository,
-using ruby 1.9.3, and running `bundle install`.
-
-### Zendesk API Test Server
-
-Included in this repository is the code for the [Zendesk API Tester](https://zendesk-api.herokuapp.com/) website.
-
-```sh
-bin/zendesk server --help
-```
-
-Additional Dependencies:
-
-* sinatra
-* sinatra-contrib
-* haml
-* compass
-* coderay
-* coderay_bash
-* redcarpet
-* mongoid (and a working MongoDB instance)
-
-### Zendesk Console
-
-WIP
-
-```sh
-bin/zendesk console --help
-```
-
-Additional Dependencies:
-
-* ripl
 
 ## Note on Patches/Pull Requests
 1. Fork the project.

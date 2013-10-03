@@ -2,7 +2,6 @@ require 'faraday'
 require 'faraday_middleware'
 
 require 'zendesk_api/version'
-require 'zendesk_api/rescue'
 require 'zendesk_api/sideloading'
 require 'zendesk_api/configuration'
 require 'zendesk_api/collection'
@@ -14,14 +13,14 @@ require 'zendesk_api/middleware/response/callback'
 require 'zendesk_api/middleware/response/deflate'
 require 'zendesk_api/middleware/response/gzip'
 require 'zendesk_api/middleware/response/parse_iso_dates'
+require 'zendesk_api/middleware/response/raise_error'
 require 'zendesk_api/middleware/response/logger'
+require 'zendesk_api/delegator'
 
 module ZendeskAPI
   # The top-level class that handles configuration and connection to the Zendesk API.
   # Can also be used as an accessor to resource collections.
   class Client
-    include Rescue
-
     # @return [Configuration] Config instance
     attr_reader :config
     # @return [Array] Custom response callbacks
@@ -34,12 +33,15 @@ module ZendeskAPI
       method = method.to_s
       options = args.last.is_a?(Hash) ? args.pop : {}
 
-      @resource_cache[method] ||= {}
-
-      if !options[:reload] && (cached = @resource_cache[method][options.hash])
+      @resource_cache[method] ||= { :class => nil, :cache => ZendeskAPI::LRUCache.new }
+      if !options.delete(:reload) && (cached = @resource_cache[method][:cache].read(options.hash))
         cached
       else
-        @resource_cache[method][options.hash] = ZendeskAPI::Collection.new(self, ZendeskAPI.const_get(ZendeskAPI::Helpers.modulize_string(Inflection.singular(method))), options)
+        klass_as_const = ZendeskAPI::Helpers.modulize_string(Inflection.singular(method))
+        klass = class_from_namespace(klass_as_const)
+
+        @resource_cache[method][:class] ||= klass
+        @resource_cache[method][:cache].write(options.hash, ZendeskAPI::Collection.new(self, @resource_cache[method][:class], options))
       end
     end
 
@@ -56,8 +58,6 @@ module ZendeskAPI
       return @current_account if @current_account && !reload
       @current_account = Hashie::Mash.new(connection.get('account/resolve').body)
     end
-
-    rescue_client_error :current_account
 
     # Returns the current locale
     # @return [ZendeskAPI::Locale] Current locale or nil
@@ -86,6 +86,7 @@ module ZendeskAPI
       config.retry = !!config.retry # nil -> false
 
       set_token_auth
+
       set_default_logger
       add_warning_callback
     end
@@ -111,6 +112,10 @@ module ZendeskAPI
       end
     end
 
+    def voice
+      Delegator.new(self)
+    end
+
     protected
 
     # Called by {#connection} to build a connection. Can be overwritten in a
@@ -125,27 +130,50 @@ module ZendeskAPI
     def build_connection
       Faraday.new(config.options) do |builder|
         # response
-        builder.use Faraday::Request::BasicAuthentication, config.username, config.password
-        builder.use Faraday::Response::RaiseError
+        builder.use ZendeskAPI::Middleware::Response::RaiseError
         builder.use ZendeskAPI::Middleware::Response::Callback, self
         builder.use ZendeskAPI::Middleware::Response::Logger, config.logger if config.logger
         builder.use ZendeskAPI::Middleware::Response::ParseIsoDates
         builder.response :json, :content_type => 'application/json'
-        builder.use ZendeskAPI::Middleware::Response::Gzip
-        builder.use ZendeskAPI::Middleware::Response::Deflate
+
+        adapter = config.adapter || Faraday.default_adapter
+
+        unless [:em_http, Faraday::Adapter::EMHttp].include?(adapter)
+          builder.use ZendeskAPI::Middleware::Response::Gzip
+          builder.use ZendeskAPI::Middleware::Response::Deflate
+        end
 
         # request
-        builder.use ZendeskAPI::Middleware::Request::EtagCache, :cache => config.cache
+        if config.access_token
+          builder.authorization("Bearer", config.access_token)
+        else
+          builder.use Faraday::Request::BasicAuthentication, config.username, config.password
+        end
+
+        if config.cache
+          builder.use ZendeskAPI::Middleware::Request::EtagCache, :cache => config.cache
+        end
+
         builder.use ZendeskAPI::Middleware::Request::Upload
         builder.request :multipart
         builder.request :json
         builder.use ZendeskAPI::Middleware::Request::Retry, :logger => config.logger if config.retry # Should always be first in the stack
 
-        builder.adapter *config.adapter || Faraday.default_adapter
+        builder.adapter *adapter
       end
     end
 
     private
+
+    def class_from_namespace(klass_as_const)
+      [ZendeskAPI, ZendeskAPI::Voice].each do |ns|
+        if ns.const_defined?(klass_as_const)
+          return ns.const_get(klass_as_const)
+        end
+      end
+
+      nil
+    end
 
     def check_url
       if !config.allow_http && config.url !~ /^https/
