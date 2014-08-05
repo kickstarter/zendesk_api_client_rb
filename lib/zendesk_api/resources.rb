@@ -26,7 +26,6 @@ module ZendeskAPI
   class Group < Resource
     has_many User
   end
-  class Trigger < ReadResource; end
   class SharingAgreement < ReadResource; end
   class JobStatus < ReadResource; end
 
