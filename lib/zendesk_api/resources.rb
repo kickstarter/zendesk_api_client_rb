@@ -22,7 +22,6 @@ module ZendeskAPI
   class Topic < Resource; end
   class Bookmark < Resource; end
   class Ability < DataResource; end
-  class Macro < Resource; end
   class Group < Resource
     has_many User
   end
